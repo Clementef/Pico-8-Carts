@@ -3,13 +3,12 @@ version 36
 __lua__
 --global variables
 sqrt2=1.414
---generation vars
-wall_thickness=1
+
 --camera vars
 start_speed=15
 end_speed=1
 room={x=0,y=0}
-cam_x = 0 cam_y = 0
+cam={x=0,y=0}
 
 --door vars
 door_width = 16
@@ -39,9 +38,11 @@ ltgreen=11lavender=13lav=13beige=15
 --game loop
 function _init()
   --initialize object types
+  init_entity()
   for _,init in pairs(_inits) do
     init()
   end
+  player:init()
   --spawn room
   inst_doors(0,0)
   inst(kinebody,0,0,20,20,10,20)
@@ -59,7 +60,7 @@ function _update60()
   player_input=""
 
   --update camera
-  update_camera(cam_x,cam_y,room.x*128,room.y*128)
+  update_camera(cam.x,cam.y,room.x*128,room.y*128)
 
   --player transition handler
   if transition then
@@ -81,14 +82,14 @@ end
 
 function _draw()
   cls()
-  camera(cam_x,cam_y)
+  camera(cam.x,cam.y)
   --draw game_objs in world space
   local_call("draw")
   player:draw()
   camera()
 
   --draw map in modulated world space
-  camera(cam_x%128, cam_y%128)
+  camera(cam.x%128, cam.y%128)
   map(0, 0, 0, 0, 16*3,16*3)
   camera()
 
@@ -166,20 +167,22 @@ game_obj={
   size={w=4,h=8},
   c=ltgray,
   tag="game_obj",
+  x_off=0,
 
   init=function(self,not_adjust_room)
+    self.x_off=flr(self.size.w/2)
     if not not_adjust_room then
       self.pos.x+=self.room.x*128
       self.pos.y+=self.room.y*128
     end
   end,
   
-  update=function(self)
-  end,
+  update=function(self)end,
   
   draw=function(self)
     draw_calls+=1
     self:o_draw()
+    self:h_draw()
   end,
 
   o_draw=function(self)
@@ -188,6 +191,10 @@ game_obj={
       self.pos.y+self.size.h,
       self.c)
   end,
+
+  h_draw=function(self)end,
+
+  damage=function(self)end,
 
   new=function(self)
     return copy(self)
@@ -203,16 +210,46 @@ game_obj={
   end
 }
 
+--must be called before inits
+function init_entity()
+  entity=game_obj:new()
+  entity.health_bar={
+    val=100,
+    _max=100,
+    w=8,h=1,
+    c=ltgray,bgc=gray
+  }
+  function entity:damage(_damage)
+    self.health_bar.val=max(0,self.health_bar.val-_damage)
+    if self.health_bar.val==0 then
+      self:destroy()
+    end
+  end
+  function entity:h_draw()
+    local _y=self.pos.y-2
+    local _x=self.x_off+self.pos.x-4
+    --bg line
+    line(_x,_y,
+      _x+self.health_bar.w,_y,
+      self.health_bar.bgc)
+    --health bar
+    line(_x,_y,
+      _x+self.health_bar.w*(self.health_bar.val/self.health_bar._max),_y,
+      self.health_bar.c)
+  end
+end
+
 --game object type initializers
 _inits={
   --init player
   init_player = function()
-    player=game_obj:new()
+    player=entity:new()
     player.tag="player"
     player.c=red
     player.next_room=nil
     player.can_control=true
     player.vel={x=0,y=0}
+    player.health_bar.c=14
 
     player.can_cast=true
     player.cast_delay=0
@@ -401,7 +438,7 @@ _inits={
 
   --init kinematic body
   init_kinebody = function()
-    kinebody=game_obj:new()
+    kinebody=entity:new()
     kinebody.tag="kinebody"
     kinebody.c=green
     --checks whether the kinematic body will collde
@@ -451,8 +488,13 @@ _inits={
       self.pos.y+=self.vel.y
 
       if will_collide_room(self,self.pos.x,self.pos.y)
-        or will_collide(self,self.pos.x,self.pos.y)
       then
+        self:destroy()
+      end
+
+      local collisions=get_collisions(self,self.pos.x,self.pos.y)
+      for _,obj in pairs(collisions) do
+        obj:damage(10)
         self:destroy()
       end
     end
@@ -525,8 +567,8 @@ end
 function will_collide_room(_obj,_x,_y)
   _x%=128
   _y%=128
-  if  _x>=wall_thickness and _x<=127-_obj.size.w-wall_thickness
-  and _y>=wall_thickness and _y<=127-_obj.size.h-wall_thickness then
+  if  _x>=1 and _x<=127-_obj.size.w-1
+  and _y>=1 and _y<=127-_obj.size.h-1 then
     return false
   else
     return true
@@ -584,12 +626,12 @@ end
     if (x!=tx) then
       dist_norm = 1-((abs(x-tx))/128)
       speed = flr(lerp(start_speed,end_speed,dist_norm))
-      cam_x = step_towards(x,tx,speed)
+      cam.x = step_towards(x,tx,speed)
     end
     if (y!=ty) then
       dist_norm = 1-((abs(y-ty))/128)
       speed = flr(lerp(start_speed,end_speed,dist_norm))
-      cam_y = step_towards(y,ty,speed)
+      cam.y = step_towards(y,ty,speed)
     end
   end
 
